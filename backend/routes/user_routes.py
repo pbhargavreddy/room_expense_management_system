@@ -31,7 +31,7 @@ def login(user:UserValidate, db : db_dependency):
     if not user_in_db :
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-    is_valid = bcrypt.checkpw(user.password.encode('utf-8'),hashed_password=user_in_db.password)
+    is_valid = bcrypt.checkpw(user.password.encode('utf-8'),hashed_password=user_in_db.password) # pyright: ignore[reportArgumentType]
     
     if not is_valid:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
