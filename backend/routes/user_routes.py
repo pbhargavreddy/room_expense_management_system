@@ -1,38 +1,62 @@
-from fastapi import APIRouter,Depends,HTTPException,status
 from typing import Annotated
-from sqlalchemy.orm import Session
+
 import bcrypt
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
-
-from backend.schema import UserCreate,UserValidate
-from backend.Database.database import get_db,SessionLocal
+from backend.Database.database import get_db
 from backend.Database.models import User
-router = APIRouter()
+from backend.schema import AuthResponse, UserCreate, UserLogin, UserSummary
+
+router = APIRouter(prefix="/api/users", tags=["users"])
+db_dependency = Annotated[Session, Depends(get_db)]
 
 
-db_dependency = Annotated[Session,Depends(get_db)]
-@router.post('/signup')
-def create_user(user:UserCreate , db:db_dependency):
-    password = user.password
+@router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+def create_user(user: UserCreate, db: db_dependency):
+    existing_user = db.query(User).filter(User.username == user.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already exists",
+        )
 
-    salt = bcrypt.gensalt()
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'),salt)
+    hashed_password = bcrypt.hashpw(user.password.encode("utf-8"), bcrypt.gensalt())
+    new_user = User(username=user.username, password=hashed_password, role=user.role)
 
-    new_user = User(username=user.username,password =hashed_password)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    return {"detail":"User created succesfully"}
+    return AuthResponse(
+        message="User created successfully",
+        user=UserSummary.model_validate(new_user),
+    )
 
-@router.post('/signin')
-def login(user:UserValidate, db : db_dependency):
+
+@router.post("/signin", response_model=AuthResponse)
+def login(user: UserLogin, db: db_dependency):
     user_in_db = db.query(User).filter(User.username == user.username).first()
-    if not user_in_db :
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if not user_in_db:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    is_valid = bcrypt.checkpw(user.password.encode('utf-8'),hashed_password=user_in_db.password) # pyright: ignore[reportArgumentType]
-    
+    is_valid = bcrypt.checkpw(
+        user.password.encode("utf-8"),
+        user_in_db.password,
+    )
     if not is_valid:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return {"message":"Login succesfull"}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    return AuthResponse(
+        message="Login successful",
+        user=UserSummary.model_validate(user_in_db),
+    )
+
+
+@router.get("/", response_model=list[UserSummary])
+def list_users(db: db_dependency):
+    users = db.query(User).order_by(User.username.asc()).all()
+    return [UserSummary.model_validate(user) for user in users]
